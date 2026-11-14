@@ -136,12 +136,12 @@
   <p>对照 BF16 原始权重，在 12,288 个位置上比较输出，英文、中文、代码各占三分之一。</p>
   <div class="table">
     <table>
-      <thead><tr><th>格式</th><th>每权重位数</th><th>KL 散度</th><th>首选词一致率</th><th>困惑度变化</th></tr></thead>
+      <thead><tr><th>格式</th><th>位数</th><th>KL 散度</th><th>首选词一致率</th><th>困惑度变化</th></tr></thead>
       <tbody>
         <tr><td>MLX 8-bit 整数（参照）</td><td>8.6</td><td>0.0014</td><td>98.7%</td><td>+0.06%</td></tr>
         <tr><td>MLX 4-bit 整数</td><td>4.5</td><td>0.079</td><td>89.8%</td><td>+5.7%</td></tr>
         <tr><td>标准 NVFP4</td><td>4.5</td><td>0.081</td><td>89.8%</td><td>+5.7%</td></tr>
-        <tr><td>MLX 自带的 NVFP4 模式</td><td>4.5</td><td>0.106</td><td>88.2%</td><td>+7.3%</td></tr>
+        <tr><td>MLX 的 NVFP4 模式</td><td>4.5</td><td>0.106</td><td>88.2%</td><td>+7.3%</td></tr>
       </tbody>
     </table>
   </div>
@@ -173,7 +173,7 @@
     <li>满载时整机 85–96 W，GPU 最高 94 °C，风扇 5800 rpm。128GB 内存够用，全程没有交换。</li>
     <li>其他程序占用 GPU 时速度会下降。测试当天 macOS 后台照片分析运行期间，单路速度为 18–24 tok/s。</li>
     <li>同样 4.5 位，MLX 4-bit 整数和标准 NVFP4 精度相同，作为权重格式是等价的。</li>
-    <li>MLX 自带的 NVFP4 模式精度更差，在这台机器上用 4-bit 整数格式。</li>
+    <li>MLX 的 NVFP4 模式精度更差，在这台机器上用 4-bit 整数格式。</li>
     <li>两种格式的速度相差在几个百分点以内。</li>
     <li>8-bit 几乎无损，首选词一致率 98.7%，单路出字约 16 tok/s。4-bit 的首选词一致率是 89.8%，单路出字 27 tok/s。</li>
     <li>这次只比较了权重格式。N 卡上的 NVFP4 通常连激活值一起量化，不在对比范围内。</li>
