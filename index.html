@@ -3,36 +3,20 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>新款 MacBook Pro（M5 Max，128GB）本地大模型压测报告</title>
-<meta name="description" content="新款 MacBook Pro（M5 Max，128GB）用 vLLM 跑 Qwen3.8-27B 的压测结果：出字速度、并发、长上下文和硬件数据。">
+<title>本地大模型压测对比：MacBook Pro M5 Max 128GB 与 ASUS ProArt 16 RTX Spark 128GB</title>
+<meta name="description" content="MacBook Pro M5 Max 128GB 与 ASUS ProArt 16 RTX Spark 128GB 用 vLLM 跑 Qwen3.8-27B 的压测对比：出字速度、并发、长上下文、硬件状态和瓶颈分析。">
 <style>
-  :root {
-    --bg: #ffffff;
-    --text: #1d1d1f;
-    --muted: #6e6e73;
-    --line: #d9d9de;
-    --head: #f5f5f7;
-    --accent: #0a66c2;
-  }
+  :root { --bg: #ffffff; --text: #1d1d1f; --muted: #6e6e73; --line: #d9d9de; --head: #f5f5f7; --accent: #0a66c2; }
   @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #111214;
-      --text: #e8e8ea;
-      --muted: #9a9aa1;
-      --line: #2e3035;
-      --head: #1b1c1f;
-      --accent: #6cb0f5;
-    }
+    :root { --bg: #111214; --text: #e8e8ea; --muted: #9a9aa1; --line: #2e3035; --head: #1b1c1f; --accent: #6cb0f5; }
   }
   * { box-sizing: border-box; }
   body {
-    margin: 0;
-    background: var(--bg);
-    color: var(--text);
+    margin: 0; background: var(--bg); color: var(--text);
     font: 16px/1.75 -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
     -webkit-text-size-adjust: 100%;
   }
-  main { max-width: 920px; margin: 0 auto; padding: 56px 24px 80px; }
+  main { max-width: 980px; margin: 0 auto; padding: 56px 24px 80px; }
   h1 { font-size: 30px; line-height: 1.35; margin: 0 0 8px; text-wrap: balance; }
   h2 { font-size: 22px; margin: 56px 0 4px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
   h3 { font-size: 17px; margin: 32px 0 12px; }
@@ -43,6 +27,7 @@
   table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
   th, td { padding: 10px 14px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; }
   th { background: var(--head); font-weight: 600; white-space: nowrap; }
+  th[colspan] { text-align: center; border-left: 1px solid var(--line); }
   td:first-child { white-space: nowrap; }
   figure { margin: 16px 0 32px; }
   figure img { display: block; width: 100%; height: auto; border-radius: 8px; border: 1px solid var(--line); }
@@ -56,91 +41,122 @@
 </head>
 <body>
 <main>
-  <h1>新款 MacBook Pro（M5 Max，128GB）本地大模型压测报告</h1>
+  <h1>本地大模型压测对比：MacBook Pro M5 Max 128GB 与 ASUS ProArt 16 RTX Spark 128GB</h1>
   <p class="date">测试日期：2026-11-14</p>
 
-  <h2>一、最终状态</h2>
+  <h2>一、结论</h2>
+  <ol>
+    <li>ASUS 的速度由屏幕状态决定。亮屏时 GPU 在 P0，单路 22.7 tok/s；熄屏进入 Modern Standby 后 GPU 停在 P8，单路 11.5 tok/s。</li>
+    <li>单路出字：MacBook 26.8 tok/s，ASUS 亮屏 22.7 tok/s。8 路合计：MacBook 80.6 tok/s，ASUS 亮屏 114.9 tok/s。</li>
+    <li>读入长上下文 ASUS 亮屏更快（tok/s，ASUS 对 MacBook）：8 千 token 1,589 对 634，3 万 token 1,367 对 603，6 万 token 1,136 对 484。熄屏时为 398–503。</li>
+    <li>同一段上下文再次提问，两台机器都命中前缀缓存，首字时间 0.4–3 秒。ASUS 的缓存按 832 token 整页复用，对不齐时整段重读。</li>
+    <li>满载时 MacBook 整机 67–96 W、GPU 94 °C；ASUS 亮屏 GPU 28–42 W、67 °C，熄屏 GPU 4–8 W。</li>
+    <li>ASUS 的 KV 缓存设为 12GB，同时运行上限 8 路（占用 90.1%），第 9 路排队；MacBook 设 20GB，8 路时占用 19.7%。</li>
+    <li>量化格式：同为每权重 4.5 位，MLX 4-bit 整数与标准 NVFP4 精度相同（首选词一致率 89.8%），速度相差几个百分点；MLX 自带的 NVFP4 模式精度更差（88.2%）。8-bit 几乎无损（98.7%），MacBook 上单路 16.4 tok/s。</li>
+  </ol>
 
-  <h3>环境</h3>
+  <h2>二、环境</h2>
   <div class="table">
     <table>
-      <thead><tr><th>项目</th><th>内容</th></tr></thead>
+      <thead>
+        <tr><th>项目</th><th>MacBook Pro M5 Max</th><th>ASUS ProArt 16 RTX Spark</th></tr>
+      </thead>
       <tbody>
-        <tr><td>机器</td><td>新款 MacBook Pro，Apple M5 Max（18 核 CPU，40 核 GPU），128GB 内存</td></tr>
-        <tr><td>系统</td><td>macOS 27.2.1，接电源</td></tr>
-        <tr><td>推理服务</td><td>vLLM 0.33.0 + vllm-metal 0.33.0</td></tr>
-        <tr><td>模型</td><td><a href="https://huggingface.co/orcarouter/Qwen3.8-27B-Uncensored-MLX">orcarouter/Qwen3.8-27B-Uncensored-MLX</a>，4-bit 量化，权重 15GB</td></tr>
-        <tr><td>服务参数</td><td>上下文上限 131072 token，KV 缓存 20GB</td></tr>
-        <tr><td>压测方式</td><td>流式接口，关闭思考，每路生成固定数量的 token</td></tr>
-        <tr><td>监控</td><td>Prometheus + Grafana，硬件数据来自 macmon</td></tr>
+        <tr><td>硬件</td><td>Apple M5 Max（18 核 CPU，40 核 GPU），128GB 统一内存</td><td>NVIDIA RTX Spark N1X（20 核 CPU，Blackwell GPU），128GB：系统内存 64GB + 显存 64GB</td></tr>
+        <tr><td>系统</td><td>macOS 27.2.1，接电源</td><td>Windows 11 ARM64 + WSL2，接电源，电源方案 Standard</td></tr>
+        <tr><td>推理服务</td><td>vLLM 0.33.0 + vllm-metal 0.33.0</td><td>vLLM 0.33.0（CUDA，运行在 WSL2 内）</td></tr>
+        <tr><td>模型</td><td><a href="https://huggingface.co/orcarouter/Qwen3.8-27B-Uncensored-MLX">orcarouter/Qwen3.8-27B-Uncensored-MLX</a>，4-bit 量化，权重 15GB</td><td><a href="https://huggingface.co/orcarouter/Qwen3.8-27B-Uncensored-NVFP4">orcarouter/Qwen3.8-27B-Uncensored-NVFP4</a>，NVFP4 量化，权重占显存 21.5 GiB；草稿模型 <a href="https://huggingface.co/incoai/Qwen3.8-27B-DFlash2">incoai/Qwen3.8-27B-DFlash2</a> 做推测解码，每步 7 个草稿 token</td></tr>
+        <tr><td>服务参数</td><td>上下文上限 131072 token，KV 缓存 20GB</td><td>上下文上限 131072 token，KV 缓存 12GB</td></tr>
+        <tr><td>压测方式</td><td>流式接口，关闭思考，每路生成固定数量的 token</td><td>流式接口，关闭思考，每路 512 token</td></tr>
+        <tr><td>监控</td><td>Prometheus + Grafana，硬件数据来自 macmon</td><td>Prometheus + Grafana，硬件数据来自 nvidia-smi 和 Windows 性能计数器</td></tr>
       </tbody>
     </table>
   </div>
 
-  <h3>出字速度</h3>
+  <h2>三、出字速度</h2>
+  <p>单位 tok/s，合计为各路速度之和。ASUS 分亮屏和熄屏两种状态，原因见第七节。</p>
   <div class="table">
     <table>
-      <thead><tr><th>并发路数</th><th>每路速度</th><th>合计速度</th><th>首字时间</th></tr></thead>
+      <thead>
+        <tr><th rowspan="2">并发</th><th colspan="2">MacBook</th><th colspan="2">ASUS 亮屏</th><th colspan="2">ASUS 熄屏</th></tr>
+        <tr><th>每路</th><th>合计</th><th>每路</th><th>合计</th><th>每路</th><th>合计</th></tr>
+      </thead>
       <tbody>
-        <tr><td>1</td><td>26.8 tok/s</td><td>26.9 tok/s</td><td>0.15 秒</td></tr>
-        <tr><td>2</td><td>22.7 tok/s</td><td>45.4 tok/s</td><td>0.38 秒</td></tr>
-        <tr><td>4</td><td>17.1 tok/s</td><td>68.2 tok/s</td><td>0.47 秒</td></tr>
-        <tr><td>8</td><td>10.1 tok/s</td><td>80.6 tok/s</td><td>0.68 秒</td></tr>
+        <tr><td>1</td><td>26.8</td><td>26.9</td><td>22.7</td><td>22.7</td><td>11.5</td><td>11.5</td></tr>
+        <tr><td>2</td><td>22.7</td><td>45.4</td><td>20.7</td><td>41.4</td><td>9.3</td><td>18.6</td></tr>
+        <tr><td>4</td><td>17.1</td><td>68.2</td><td>19.2</td><td>76.9</td><td>8.6</td><td>34.5</td></tr>
+        <tr><td>8</td><td>10.1</td><td>80.6</td><td>14.4</td><td>114.9</td><td>6.5</td><td>52.3</td></tr>
       </tbody>
     </table>
   </div>
-  <p>单路连续生成 2000 token，平均 25.8 tok/s。</p>
-  <p>同一模型的 8-bit 版本单路出字 16.4 tok/s。</p>
+  <p>单路连续生成 2000 token：MacBook 25.8 tok/s，ASUS 亮屏 19.4 tok/s，熄屏 10.8 tok/s。</p>
+  <p>MacBook 上同一模型的 8-bit 版本单路出字 16.4 tok/s。ASUS 不开推测解码时，熄屏状态单路为 3.8 tok/s。</p>
 
-  <h3>长上下文</h3>
+  <h3>首字时间</h3>
   <div class="table">
     <table>
-      <thead><tr><th>上下文长度</th><th>首次读入耗时</th><th>读入速度</th><th>读完后的出字速度</th><th>再次提问的首字时间</th></tr></thead>
+      <thead>
+        <tr><th>并发</th><th>MacBook</th><th>ASUS 亮屏</th><th>ASUS 熄屏</th></tr>
+      </thead>
       <tbody>
-        <tr><td>7,580 token</td><td>12.0 秒</td><td>634 tok/s</td><td>24.5 tok/s</td><td>1.25 秒</td></tr>
-        <tr><td>29,306 token</td><td>48.6 秒</td><td>603 tok/s</td><td>22.7 tok/s</td><td>0.99 秒</td></tr>
-        <tr><td>61,348 token</td><td>126.8 秒</td><td>484 tok/s</td><td>17.2 tok/s</td><td>1.34 秒</td></tr>
-      </tbody>
-    </table>
-  </div>
-
-  <h3>硬件</h3>
-  <div class="table">
-    <table>
-      <thead><tr><th>项目</th><th>压测期间</th></tr></thead>
-      <tbody>
-        <tr><td>整机功耗</td><td>平均 67 W，峰值 96 W</td></tr>
-        <tr><td>GPU 利用率</td><td>平均 85%，单路生成阶段 93%</td></tr>
-        <tr><td>GPU 温度</td><td>最高 94 °C</td></tr>
-        <tr><td>CPU 温度</td><td>最高 88 °C</td></tr>
-        <tr><td>风扇转速</td><td>最高 5790 rpm</td></tr>
-        <tr><td>内存</td><td>已用最高 61 GB，内存压力最高 35%，没有使用交换</td></tr>
-        <tr><td>KV 缓存</td><td>最高占用 19.7%</td></tr>
+        <tr><td>1</td><td>0.15 秒</td><td>0.39 秒</td><td>0.67 秒</td></tr>
+        <tr><td>2</td><td>0.38 秒</td><td>0.58 秒</td><td>0.88 秒</td></tr>
+        <tr><td>4</td><td>0.47 秒</td><td>0.58 秒</td><td>1.19 秒</td></tr>
+        <tr><td>8</td><td>0.68 秒</td><td>0.72 秒</td><td>2.50 秒</td></tr>
       </tbody>
     </table>
   </div>
 
-  <h2>二、截图</h2>
+  <h2>四、长上下文</h2>
+  <div class="table">
+    <table>
+      <thead>
+        <tr><th>上下文</th><th>机器</th><th>首次读入耗时</th><th>读入速度</th><th>读完后的出字速度</th><th>再次提问的首字时间</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>约 8 千</td><td>MacBook（7,580 token）</td><td>12.0 秒</td><td>634 tok/s</td><td>24.5 tok/s</td><td>1.25 秒</td></tr>
+        <tr><td></td><td>ASUS 亮屏（7,550 token）</td><td>4.8 秒</td><td>1,589 tok/s</td><td>23.4 tok/s</td><td>0.45 秒</td></tr>
+        <tr><td></td><td>ASUS 熄屏（7,550 token）</td><td>15.0 秒</td><td>503 tok/s</td><td>10.8 tok/s</td><td>0.64 秒</td></tr>
+        <tr><td>约 3 万</td><td>MacBook（29,306 token）</td><td>48.6 秒</td><td>603 tok/s</td><td>22.7 tok/s</td><td>0.99 秒</td></tr>
+        <tr><td></td><td>ASUS 亮屏（28,373 token）</td><td>20.8 秒</td><td>1,367 tok/s</td><td>21.4 tok/s</td><td>0.69 秒</td></tr>
+        <tr><td></td><td>ASUS 熄屏（28,373 token）</td><td>57.4 秒</td><td>495 tok/s</td><td>12.1 tok/s</td><td>0.88 秒</td></tr>
+        <tr><td>约 6 万</td><td>MacBook（61,348 token）</td><td>126.8 秒</td><td>484 tok/s</td><td>17.2 tok/s</td><td>1.34 秒</td></tr>
+        <tr><td></td><td>ASUS 亮屏（59,161 token）</td><td>52.1 秒</td><td>1,136 tok/s</td><td>20.3 tok/s</td><td>0.92 秒</td></tr>
+        <tr><td></td><td>ASUS 熄屏（59,809 token）</td><td>150.2 秒</td><td>398 tok/s</td><td>9.1 tok/s</td><td>3.07 秒</td></tr>
+      </tbody>
+    </table>
+  </div>
 
-  <p>压测期间的推理指标：</p>
-  <figure>
-    <a href="images/inference.png"><img src="images/inference.png" width="3200" height="1822" alt="压测期间的推理指标面板：出字速度、首字时间、读入速度、请求数、逐 token 间隔、端到端耗时、缓存占用和命中率"></a>
-  </figure>
+  <h2>五、硬件状态</h2>
+  <div class="table">
+    <table>
+      <thead>
+        <tr><th>项目</th><th>MacBook Pro M5 Max</th><th>ASUS 亮屏</th><th>ASUS 熄屏</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>GPU 性能状态</td><td>未采集</td><td>P0，2.0–2.4 GHz</td><td>P8，0.7–0.8 GHz</td></tr>
+        <tr><td>功耗</td><td>整机平均 67 W，峰值 96 W</td><td>GPU 28–42 W，峰值 55 W</td><td>GPU 4–8 W，峰值 9 W</td></tr>
+        <tr><td>GPU 利用率</td><td>平均 85%，单路生成阶段 93%</td><td>68–94%</td><td>84–92%</td></tr>
+        <tr><td>GPU 温度</td><td>最高 94 °C</td><td>最高 67 °C</td><td>最高 52 °C</td></tr>
+        <tr><td>CPU</td><td>温度最高 88 °C</td><td>占用 15–24%</td><td>占用 9–15%</td></tr>
+        <tr><td>风扇</td><td>最高 5790 rpm</td><td>未采集</td><td>未采集</td></tr>
+        <tr><td>内存</td><td>已用最高 61 GB，没有使用交换</td><td>系统内存 25 GiB，显存 43 GiB</td><td>系统内存 28 GiB，显存 43 GiB</td></tr>
+        <tr><td>KV 缓存占用</td><td>最高 19.7%（20GB）</td><td>最高 90.1%（12GB）</td><td>最高 90.1%（12GB）</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>ASUS 的 GPU 上限频率 3.0 GHz；功耗为 nvidia-smi 读数，整机功耗没有可用的传感器。</p>
 
-  <p>压测期间的硬件指标：</p>
-  <figure>
-    <a href="images/hardware.png"><img src="images/hardware.png" width="3200" height="1294" loading="lazy" alt="压测期间的硬件指标面板：GPU 和 CPU 利用率、功耗、温度与风扇、内存、内存压力"></a>
-  </figure>
-
-  <h2>三、量化格式对比</h2>
-
-  <p>同一份 BF16 原始权重（<a href="https://huggingface.co/orcarouter/Qwen3.8-27B-Uncensored">orcarouter/Qwen3.8-27B-Uncensored</a>），用 MLX 0.32.4 分别转成 4-bit 整数和 NVFP4 两种格式。量化的层相同，只量化权重，直接取最近值，没有校准。两种格式折合都是每权重 4.5 位。</p>
+  <h2>六、量化格式对比</h2>
+  <p>在 MacBook 上做。同一份 BF16 原始权重（<a href="https://huggingface.co/orcarouter/Qwen3.8-27B-Uncensored">orcarouter/Qwen3.8-27B-Uncensored</a>），用 MLX 0.32.4 分别转成 4-bit 整数和 NVFP4 两种格式。量化的层相同，只量化权重，直接取最近值，没有校准。两种格式折合都是每权重 4.5 位。</p>
 
   <h3>精度</h3>
   <p>对照 BF16 原始权重，在 12,288 个位置上比较输出，英文、中文、代码各占三分之一。</p>
   <div class="table">
     <table>
-      <thead><tr><th>格式</th><th>位数</th><th>KL 散度</th><th>首选词一致率</th><th>困惑度变化</th></tr></thead>
+      <thead>
+        <tr><th>格式</th><th>位数</th><th>KL 散度</th><th>首选词一致率</th><th>困惑度变化</th></tr>
+      </thead>
       <tbody>
         <tr><td>MLX 8-bit 整数（参照）</td><td>8.6</td><td>0.0014</td><td>98.7%</td><td>+0.06%</td></tr>
         <tr><td>MLX 4-bit 整数</td><td>4.5</td><td>0.079</td><td>89.8%</td><td>+5.7%</td></tr>
@@ -153,10 +169,12 @@
   <p>MLX 0.32.4 的 NVFP4 模式对普通线性层没有每个张量的缩放。三者的权重误差分别是：MLX 4-bit 整数 9.3%，标准 NVFP4 9.5%，MLX 的 NVFP4 模式 11.3%。</p>
 
   <h3>速度</h3>
-  <p>用 vLLM 以相同参数交替各测两轮。测试时没有其他程序占用 GPU，数字比第一节略高。</p>
+  <p>用 vLLM 以相同参数交替各测两轮。测试时没有其他程序占用 GPU，数字比第三、四节的 MacBook 数据略高。</p>
   <div class="table">
     <table>
-      <thead><tr><th>项目</th><th>MLX 4-bit 整数</th><th>MLX 的 NVFP4 模式</th></tr></thead>
+      <thead>
+        <tr><th>项目</th><th>MLX 4-bit 整数</th><th>MLX 的 NVFP4 模式</th></tr>
+      </thead>
       <tbody>
         <tr><td>单路出字</td><td>27.3–28.0 tok/s</td><td>26.8–28.6 tok/s</td></tr>
         <tr><td>4 路合计</td><td>70–72 tok/s</td><td>74–75 tok/s</td></tr>
@@ -166,22 +184,75 @@
       </tbody>
     </table>
   </div>
+  <p>这里只比较了权重格式。N 卡上的 NVFP4 通常连激活值一起量化，不在对比范围内。</p>
 
-  <h2>四、结论</h2>
+  <h2>七、ASUS 瓶颈分析</h2>
+
+  <h3>1. 熄屏后 GPU 被压在最低性能状态</h3>
+  <p>屏幕因空闲熄灭后系统进入 Modern Standby，GPU 从 P0 掉到 P8，频率从 2.0–2.4 GHz 降到 0.7–0.9 GHz。推理进程照常运行，只是变慢。系统日志里进出待机的时间点与 GPU 状态切换的时间点一致：</p>
+  <div class="table">
+    <table>
+      <thead>
+        <tr><th>时间段</th><th>系统状态</th><th>GPU</th><th>单路解码</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>17:30:45–18:14:29</td><td>Modern Standby（熄屏）</td><td>P8，0.7–0.9 GHz，4–8 W，50 °C</td><td>2.9 步/秒，11.5 tok/s</td></tr>
+        <tr><td>18:30:27–18:32:50</td><td>亮屏</td><td>P0，2.0–2.4 GHz，25–33 W，66 °C</td><td>6.3 步/秒，22–24 tok/s</td></tr>
+        <tr><td>18:32:50 之后</td><td>Modern Standby（熄屏）</td><td>P8，0.6–0.9 GHz</td><td>回到 3 步/秒</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>同一轮测试里的切换过程：18:30:27 亮屏，GPU 频率从 0.8 GHz 升到 2.3 GHz，功耗从 4 W 升到 30 W，正在生成的那一路从 9 tok/s 升到 22 tok/s；18:32:50 熄屏后回落。</p>
+  <figure>
+    <a href="images/asus-standby-transition.png"><img src="images/asus-standby-transition.png" width="2920" height="1284" alt="ASUS 从熄屏到亮屏再到熄屏：生成吞吐、单路出字速度、GPU 利用率、频率、功耗、温度"></a>
+  </figure>
+  <p>系统温区全程没有触发温控降频，电源接入。处理办法：需要全速时保持亮屏，或把接通电源时的熄屏时间设为从不。</p>
+
+  <h3>2. GPU 微基准</h3>
+  <div class="table">
+    <table>
+      <thead>
+        <tr><th rowspan="2">测试</th><th colspan="2">亮屏</th><th colspan="2">熄屏</th></tr>
+        <tr><th>结果</th><th>GPU 频率与功耗</th><th>结果</th><th>GPU 频率与功耗</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>显存读 4 GiB</td><td>206.5 GiB/s</td><td>1.52 GHz，9.7 W</td><td>152.1 GiB/s</td><td>0.67 GHz，2.1 W</td></tr>
+        <tr><td>显存写 4 GiB</td><td>153.4 GiB/s</td><td>2.29 GHz，23.9 W</td><td>112.4 GiB/s</td><td>0.67 GHz，2.7 W</td></tr>
+        <tr><td>显存拷贝 4 GiB</td><td>100.8 GiB/s</td><td>1.69 GHz，11.1 W</td><td>79.5 GiB/s</td><td>0.94 GHz，2.9 W</td></tr>
+        <tr><td>bfloat16 矩阵乘 4096²</td><td>61.9 TFLOPS</td><td>1.77 GHz，46.8 W</td><td>19.0 TFLOPS</td><td>0.60 GHz，8.4 W</td></tr>
+        <tr><td>float32 矩阵乘 4096²</td><td>12.4 TFLOPS</td><td>1.65 GHz，45.3 W</td><td>3.9 TFLOPS</td><td>0.62 GHz，10.1 W</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>3. 各环节的限制因素</h3>
   <ol>
-    <li>单路出字 26–27 tok/s，连续生成 2000 token 平均 25.8 tok/s。</li>
-    <li>并发总吞吐上限约 80 tok/s。4 路以内每路在 17 tok/s 以上，8 路时每路降到 10 tok/s。</li>
-    <li>首字时间取决于要读入多少 token。读入速度 480–630 tok/s：8 千 token 等 12 秒，3 万等 49 秒，6 万等 127 秒。</li>
-    <li>同一段上下文再次提问会命中缓存，首字时间 1–1.3 秒。</li>
-    <li>上下文越长出字越慢：8 千 token 时 24.5 tok/s，6 万 token 时 17.2 tok/s。</li>
-    <li>满载时整机 85–96 W，GPU 最高 94 °C，风扇 5800 rpm。128GB 内存够用，全程没有交换。</li>
-    <li>其他程序占用 GPU 时速度会下降。测试当天 macOS 后台照片分析运行期间，单路速度为 18–24 tok/s。</li>
-    <li>同样 4.5 位，MLX 4-bit 整数和标准 NVFP4 精度相同，作为权重格式是等价的。</li>
-    <li>MLX 的 NVFP4 模式精度更差，在这台机器上用 4-bit 整数格式。</li>
-    <li>两种格式的速度相差在几个百分点以内。</li>
-    <li>8-bit 几乎无损，首选词一致率 98.7%，单路出字约 16 tok/s。4-bit 的首选词一致率是 89.8%，单路出字 27 tok/s。</li>
-    <li>这次只比较了权重格式。N 卡上的 NVFP4 通常连激活值一起量化，不在对比范围内。</li>
+    <li>读入受算力限制。熄屏时 6 万 token 读入 398 tok/s，按每 token 54 GFLOP 折合 21 TFLOPS，与该状态下 bfloat16 矩阵乘实测的 19 TFLOPS 持平。亮屏时为 1,136 tok/s，折合 61 TFLOPS，矩阵乘实测 62 TFLOPS。</li>
+    <li>解码每步要把 21.5 GiB 权重读一遍。熄屏时显存读取 152 GiB/s，读一遍 0.14 秒，实测每步 0.34 秒。亮屏时读取 206 GiB/s，读一遍 0.10 秒，实测每步 0.16 秒，读权重占每步时间的 65%，再提速要靠内存带宽。</li>
+    <li>推测解码每步确认 3.3–4.0 个 token（草稿接受率 32%–43%），是单路速度的主要放大器：熄屏状态不开为 3.8 tok/s，开启后 11.5 tok/s。</li>
+    <li>并发受 KV 缓存限制。模型是注意力层加状态层的混合架构，vLLM 按 832 token 一页分配缓存，每个请求的状态层固定占 12GB 缓存的 11.3%。8 路占 90.1%；10 路实测为 8 路运行、2 路排队。显存还空 19 GiB，可以加大。</li>
+    <li>前缀缓存只在 832 token 的整页边界上复用，并且只有上一个请求提示末尾那个边界的状态可用。追加式对话都能命中；同一文档换一个问题时，分歧点落在该边界之前就完全不命中：熄屏状态下 3 万 token 文档实测首字 60 秒，命中时 0.8 秒。</li>
+    <li>内存按 64GB 系统内存 + 64GB 显存固定划分，模型加 KV 缓存不能超过 64GB；MacBook 的 128GB 是统一内存。</li>
+    <li>CPU、温度都有余量：CPU 占用 9–24%，GPU 最高 67 °C，系统温区没有触发温控降频。</li>
   </ol>
+
+  <h2>八、监控截图</h2>
+  <p>MacBook，推理指标：</p>
+  <figure>
+    <a href="images/inference.png"><img src="images/inference.png" width="3200" height="1822" loading="lazy" alt="MacBook 压测期间的推理指标面板"></a>
+  </figure>
+  <p>MacBook，硬件指标：</p>
+  <figure>
+    <a href="images/hardware.png"><img src="images/hardware.png" width="3200" height="1294" loading="lazy" alt="MacBook 压测期间的硬件指标面板"></a>
+  </figure>
+  <p>ASUS，推理指标（亮屏状态，19:45–19:57）：</p>
+  <figure>
+    <a href="images/asus-inference.png"><img src="images/asus-inference.png" width="2920" height="3890" loading="lazy" alt="ASUS 压测期间的推理指标面板：吞吐、并发、延迟、推测解码与缓存"></a>
+  </figure>
+  <p>ASUS，硬件指标（亮屏状态，19:45–19:57）：</p>
+  <figure>
+    <a href="images/asus-hardware.png"><img src="images/asus-hardware.png" width="2920" height="1856" loading="lazy" alt="ASUS 压测期间的硬件指标面板：GPU 利用率、频率、功耗、温度、显存，CPU 与内存"></a>
+  </figure>
 </main>
 </body>
 </html>
