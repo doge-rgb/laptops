@@ -13,7 +13,7 @@
 | 机器 | 新款 MacBook Pro，Apple M5 Max（18 核 CPU，40 核 GPU），128GB 内存 |
 | 系统 | macOS 27.2.1，接电源 |
 | 推理服务 | vLLM 0.33.0 + vllm-metal 0.33.0 |
-| 模型 | Qwen3.8-27B，MLX 4-bit 量化，权重 15GB |
+| 模型 | [orcarouter/Qwen3.8-27B-Uncensored-MLX](https://huggingface.co/orcarouter/Qwen3.8-27B-Uncensored-MLX)，4-bit 量化，权重 15GB |
 | 服务参数 | 上下文上限 131072 token，KV 缓存 20GB |
 | 压测方式 | 流式接口，关闭思考，每路生成固定数量的 token |
 | 监控 | Prometheus + Grafana，硬件数据来自 macmon |
