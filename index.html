@@ -86,6 +86,7 @@
     </table>
   </div>
   <p>单路连续生成 2000 token，平均 25.8 tok/s。</p>
+  <p>同一模型的 8-bit 版本单路出字 16.4 tok/s。</p>
 
   <h3>长上下文</h3>
   <div class="table">
@@ -127,7 +128,42 @@
     <a href="images/hardware.png"><img src="images/hardware.png" width="3200" height="1294" loading="lazy" alt="压测期间的硬件指标面板：GPU 和 CPU 利用率、功耗、温度与风扇、内存、内存压力"></a>
   </figure>
 
-  <h2>三、结论</h2>
+  <h2>三、量化格式对比</h2>
+
+  <p>同一份 BF16 原始权重（<a href="https://huggingface.co/orcarouter/Qwen3.8-27B-Uncensored">orcarouter/Qwen3.8-27B-Uncensored</a>），用 MLX 0.32.4 分别转成 4-bit 整数和 NVFP4 两种格式。量化的层相同，只量化权重，直接取最近值，没有校准。两种格式折合都是每权重 4.5 位。</p>
+
+  <h3>精度</h3>
+  <p>对照 BF16 原始权重，在 12,288 个位置上比较输出，英文、中文、代码各占三分之一。</p>
+  <div class="table">
+    <table>
+      <thead><tr><th>格式</th><th>每权重位数</th><th>KL 散度</th><th>首选词一致率</th><th>困惑度变化</th></tr></thead>
+      <tbody>
+        <tr><td>MLX 8-bit 整数（参照）</td><td>8.6</td><td>0.0014</td><td>98.7%</td><td>+0.06%</td></tr>
+        <tr><td>MLX 4-bit 整数</td><td>4.5</td><td>0.079</td><td>89.8%</td><td>+5.7%</td></tr>
+        <tr><td>标准 NVFP4</td><td>4.5</td><td>0.081</td><td>89.8%</td><td>+5.7%</td></tr>
+        <tr><td>MLX 自带的 NVFP4 模式</td><td>4.5</td><td>0.106</td><td>88.2%</td><td>+7.3%</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>标准 NVFP4 按公开定义实现：4 位浮点，16 个一组，每组一个 8 位缩放，每个张量一个 32 位缩放。量化后还原成 16 位权重再评测。用同样的做法复现 MLX 的两种模式，结果与真实量化包一致。</p>
+  <p>MLX 0.32.4 的 NVFP4 模式对普通线性层没有每个张量的缩放。三者的权重误差分别是：MLX 4-bit 整数 9.3%，标准 NVFP4 9.5%，MLX 的 NVFP4 模式 11.3%。</p>
+
+  <h3>速度</h3>
+  <p>用 vLLM 以相同参数交替各测两轮。测试时没有其他程序占用 GPU，数字比第一节略高。</p>
+  <div class="table">
+    <table>
+      <thead><tr><th>项目</th><th>MLX 4-bit 整数</th><th>MLX 的 NVFP4 模式</th></tr></thead>
+      <tbody>
+        <tr><td>单路出字</td><td>27.3–28.0 tok/s</td><td>26.8–28.6 tok/s</td></tr>
+        <tr><td>4 路合计</td><td>70–72 tok/s</td><td>74–75 tok/s</td></tr>
+        <tr><td>读入 8 千 token</td><td>684–698 tok/s</td><td>666–679 tok/s</td></tr>
+        <tr><td>8 千上下文下出字</td><td>25.8–26.0 tok/s</td><td>24.6–25.3 tok/s</td></tr>
+        <tr><td>内存占用</td><td>35 GB</td><td>35 GB</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>四、结论</h2>
   <ol>
     <li>单路出字 26–27 tok/s，连续生成 2000 token 平均 25.8 tok/s。</li>
     <li>并发总吞吐上限约 80 tok/s。4 路以内每路在 17 tok/s 以上，8 路时每路降到 10 tok/s。</li>
@@ -136,6 +172,11 @@
     <li>上下文越长出字越慢：8 千 token 时 24.5 tok/s，6 万 token 时 17.2 tok/s。</li>
     <li>满载时整机 85–96 W，GPU 最高 94 °C，风扇 5800 rpm。128GB 内存够用，全程没有交换。</li>
     <li>其他程序占用 GPU 时速度会下降。测试当天 macOS 后台照片分析运行期间，单路速度为 18–24 tok/s。</li>
+    <li>同样 4.5 位，MLX 4-bit 整数和标准 NVFP4 精度相同，作为权重格式是等价的。</li>
+    <li>MLX 自带的 NVFP4 模式精度更差，在这台机器上用 4-bit 整数格式。</li>
+    <li>两种格式的速度相差在几个百分点以内。</li>
+    <li>8-bit 几乎无损，首选词一致率 98.7%，单路出字约 16 tok/s。4-bit 的首选词一致率是 89.8%，单路出字 27 tok/s。</li>
+    <li>这次只比较了权重格式。N 卡上的 NVFP4 通常连激活值一起量化，不在对比范围内。</li>
   </ol>
 </main>
 </body>
